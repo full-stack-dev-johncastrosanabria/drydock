@@ -1,0 +1,7 @@
+{
+  "base_branch": "main",
+  "src_globs": ["bin/*", "templates/*.py"],
+  "test_globs": ["tests/*"],
+  "red": "python3 -m unittest discover -s tests",
+  "steps": [{"name": "unit", "mode": "fast", "run": "python3 -m unittest discover -s tests"}]
+}
