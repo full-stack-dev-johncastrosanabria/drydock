@@ -28,7 +28,7 @@ class BudgetTests(unittest.TestCase):
         text = (ROOT / "SKILL.md").read_text()
         front = text.split("---")[1]
         for line in ("name: drydock", "disable-model-invocation: true",
-                     "allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py status*)"):
+                     "allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py status*), Read(${CLAUDE_SKILL_DIR}/**)"):
             self.assertIn(line, front.splitlines())
         self.assertRegex(front, r"(?m)^description: \S")
         self.assertIn("!`python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py status --soft`", text)
