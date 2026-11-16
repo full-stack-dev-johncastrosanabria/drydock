@@ -96,6 +96,14 @@ class PrGateTests(RepoCase):
         self.commit("fix: pushed after approval", {"a.txt": "x\n"})
         self.assertEqual(kind(self.gate(merge)), "deny")                         # el comando nombra un HEAD viejo
 
+    def test_unborn_head_denies(self):
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        run(["git", "init", "-q", "-b", "main"], empty)
+        (empty / ".drydock").mkdir()
+        out = self.gate(PR, cwd=empty)
+        self.assertEqual(kind(out), "deny")
+
     def test_internal_error_fails_closed(self):
         self.write(f".drydock/local/evidence/{self.head()}.full.json", "{broken")
         self.assertEqual(kind(self.gate(PR)), "deny")
