@@ -65,7 +65,8 @@ def load_state(root: Path) -> dict:
         state = json.loads(path.read_text())
     except (OSError, ValueError) as e:
         raise CliError(2, "state unreadable: %s" % e)
-    if not isinstance(state, dict) or state.get("phase") not in NEXT:
+    keys = ("gates", "slice", "slices_done", "current_block")
+    if not isinstance(state, dict) or state.get("phase") not in NEXT or any(k not in state for k in keys):
         raise CliError(2, "state unreadable: unexpected structure")
     return state
 
@@ -133,8 +134,6 @@ def cmd_gate_pass(root: Path, args) -> None:
     if (phase == "build") != (args.next is not None):
         raise CliError(1, "--next is required in build and only valid there" if phase == "build"
                        else "--next is only valid in build")
-    if phase == "build" and args.next not in ("specs", "review"):
-        raise CliError(1, "--next must be specs or review")
     if phase == "build" and not state["slice"]:
         raise CliError(1, "no slice set in build")
     if phase == "build":
