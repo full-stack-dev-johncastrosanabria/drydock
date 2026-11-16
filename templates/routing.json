@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "tiers": {
+    "T1": {"model": "sonnet", "effort": "medium", "max_tasks": 8},
+    "T2": {"model": "sonnet", "effort": "high", "max_tasks": 4},
+    "T3": {"model": "opus", "effort": "xhigh", "max_tasks": 1}
+  },
+  "roles": {
+    "reviewer": {"model": "sonnet", "effort": "medium"},
+    "reviewer-t3": {"model": "opus", "effort": "high"},
+    "auditor": {"model": "opus", "effort": "xhigh"},
+    "final-reviewer": {"model": "opus", "effort": "high"}
+  }
+}
