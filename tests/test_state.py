@@ -1,6 +1,6 @@
 import json, sys, tempfile
 
-from helpers import CLI, PHASES, TEMPLATES, TS, RepoCase, run
+from helpers import CLI, PHASES, ROOT, TEMPLATES, TS, RepoCase, run
 
 
 class StateTests(RepoCase):
@@ -104,3 +104,13 @@ class StateTests(RepoCase):
         first = (self.repo / "PROJECT_STATE.md").read_bytes()
         self.cli("render-state")
         self.assertEqual((self.repo / "PROJECT_STATE.md").read_bytes(), first)
+
+    def test_status_phase_prints_phase_file_and_adapter(self):
+        self.cli("init")
+        r = self.cli("status", "--soft", "--phase")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        expected = (ROOT / "phases" / "1-requirements.md").read_text() + "\n" + (ROOT / "adapters" / "claude.md").read_text()
+        self.assertEqual(r.stdout, expected)
+        self.set_phase("review")
+        self.cli("gate", "pass", "review")
+        self.assertEqual(self.cli("status", "--soft", "--phase").stdout, "")     # closed: no phase file

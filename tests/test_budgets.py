@@ -32,3 +32,4 @@ class BudgetTests(unittest.TestCase):
             self.assertIn(line, front.splitlines())
         self.assertRegex(front, r"(?m)^description: \S")
         self.assertIn("!`python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py status --soft`", text)
+        self.assertIn("!`python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py status --soft --phase`", text)
