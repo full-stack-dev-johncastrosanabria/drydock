@@ -654,6 +654,10 @@ class StateTests(RepoCase):
         self.assertEqual(lines[:3], ["phase: requirements", "slice: -", "block: -"])
         self.assertTrue(lines[3].startswith("next: "))
         self.assertIn("gate pass requirements", lines[3])
+        self.write(".drydock/state.json", '{"phase": "build"}')          # objeto con fase válida y sin las demás claves
+        r = self.cli("status")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("state unreadable", r.stderr)
 
     def test_status_soft_never_fails(self):
         r = self.cli("status", "--soft")
@@ -689,6 +693,10 @@ class StateTests(RepoCase):
         self.assertEqual(self.snapshot(), before)
 
     def test_build_requires_next(self):
+        self.set_phase("build")                                          # sin rebanada no se cierra build
+        before = self.snapshot()
+        self.assertEqual(self.cli("gate", "pass", "build", "--next", "specs").returncode, 1)
+        self.assertEqual(self.snapshot(), before)
         self.set_phase("build", slice="001-skeleton")
         self.assertEqual(self.cli("gate", "pass", "build").returncode, 1)
         self.assertEqual(self.cli("gate", "pass", "build", "--next", "specs").returncode, 0)
