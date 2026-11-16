@@ -105,7 +105,7 @@ def red_first(root: Path, config: dict) -> tuple:
     base = resolve_base(root, config.get("base_branch", "main"))
     armed, exempt = set(), []                       # scopes with a failing test; None is a commit without scope
     for sha in git(root, "rev-list", "--reverse", "--no-merges", f"{base}..HEAD").split():
-        files = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha).splitlines()
+        files = git(root, "-c", "core.quotePath=false", "diff-tree", "--no-commit-id", "--name-only", "-r", sha).splitlines()
         message = git(root, "log", "-1", "--format=%B", sha)
         scope = (SCOPE_RE.match(message) or [None, None])[1]
         touches_test = any(matches(f, config["test_globs"]) for f in files)

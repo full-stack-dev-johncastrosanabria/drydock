@@ -1091,6 +1091,10 @@ class RedFirstTests(VerifyCase):
         ev = self.evidence("fast")
         self.assertEqual((ev["result"], ev["steps"][-1]["name"]), ("fail", "red-first"))
 
+    def test_non_ascii_source_path_is_seen(self):
+        self.impl(path="src/caf\u00e9.txt")                      # git entrecomilla rutas no ASCII si no se le pide lo contrario
+        self.assertEqual(self.verify("--fast").returncode, 1)
+
     def test_green_test_does_not_arm(self):
         self.commit("test(B01/T001): always green", {"tests/run.sh": "true\n"})
         self.impl()
@@ -1158,7 +1162,7 @@ class RedFirstTests(VerifyCase):
 - [ ] **Paso 3: correrlos y verlos fallar**
 
 Correr: `python3 -m unittest discover -s tests -p "test_verify.py" -v`
-Esperado: 20 errores en `setUp` (`templates/verify.py` no existe).
+Esperado: 21 errores en `setUp` (`templates/verify.py` no existe).
 
 - [ ] **Paso 4: commit** `git add tests && git commit -m "test(T3): verify and red-first"`
 
@@ -1178,7 +1182,7 @@ def red_first(root, config):
     base = resolve_base(root, config.get("base_branch", "main"))
     armed, exempt = set(), []                       # ámbitos con un test en rojo; None es un commit sin ámbito
     for sha in git(root, "rev-list", "--reverse", "--no-merges", f"{base}..HEAD").split():
-        files = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha).splitlines()
+        files = git(root, "-c", "core.quotePath=false", "diff-tree", "--no-commit-id", "--name-only", "-r", sha).splitlines()
         message = git(root, "log", "-1", "--format=%B", sha)
         scope = (SCOPE_RE.match(message) or [None, None])[1]
         touches_test = any(matches(f, config["test_globs"]) for f in files)
@@ -1204,7 +1208,7 @@ Atajo conocido, como comentario en el código: `# shortcut: "red" means non-zero
 - [ ] **Paso 6: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -p "test_verify.py" -v`
-Esperado: `Ran 20 tests … OK`
+Esperado: `Ran 21 tests … OK`
 
 - [ ] **Paso 7: commit** `git add templates tests && git commit -m "feat(T3): verify and red-first"`
 
@@ -1604,7 +1608,7 @@ Los globs son amplios a propósito: cualquier `.cs` es código salvo lo que viva
 - [ ] **Paso 6: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 63 tests … OK`
+Esperado: `Ran 64 tests … OK`
 
 - [ ] **Paso 7: commit** `git add -A && git commit -m "feat(T5): harness install and doctor"`
 
@@ -2020,7 +2024,7 @@ Esperado: 8 fallos (argparse no conoce `block`).
 - [ ] **Paso 6: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 87 tests … OK`
+Esperado: `Ran 88 tests … OK`
 
 - [ ] **Paso 7: commit** `git add -A && git commit -m "feat(T6B): block lifecycle"`
 
@@ -2215,7 +2219,7 @@ Esperado: 10 fallos (argparse no conoce `block merge`; `block close` exige `--me
 - [ ] **Paso 7: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 97 tests … OK`
+Esperado: `Ran 98 tests … OK`
 
 - [ ] **Paso 8: commit** `git add -A && git commit -m "feat(T6C): T1 auto-merge"`
 
@@ -2334,7 +2338,7 @@ Nombres de archivo: `drydock-impl-<tier en minúsculas>.md` por cada nivel y `dr
 - [ ] **Paso 6: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 103 tests … OK`
+Esperado: `Ran 104 tests … OK`
 
 - [ ] **Paso 7: commit** `git add -A && git commit -m "feat(T7): agent rendering"`
 
@@ -2442,7 +2446,7 @@ Tier: <tier> · Commit: <sha7>
 - [ ] **Paso 5: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 109 tests … OK`
+Esperado: `Ran 110 tests … OK`
 
 - [ ] **Paso 6: commit** `git add bin && git commit -m "feat(T8): review record and PR body"`
 
@@ -2459,7 +2463,7 @@ Esperado: `Ran 109 tests … OK`
 
 - [ ] **Paso 9: correr la suite y commit**
 
-Correr: `python3 -m unittest discover -s tests -v` → `Ran 109 tests … OK` (los presupuestos de líneas siguen en verde).
+Correr: `python3 -m unittest discover -s tests -v` → `Ran 110 tests … OK` (los presupuestos de líneas siguen en verde).
 `git add -A && git commit -m "feat(T8): blocks and build phases"`
 
 **Aceptación de H2** (repo de juguete en GitHub, 6 a 8 tareas):
@@ -2559,7 +2563,7 @@ Casi nada de lo verificado se ejecutó: salió de documentación oficial y de `-
 
 ## Verificación de punta a punta
 
-1. **Unitarias:** `python3 -m unittest discover -s tests -v` en verde tras cada tarea (11 → 16 → 36 → 51 → 63 → 79 → 87 → 97 → 103 → 109 tests), también con `/usr/bin/python3` (3.9.6). Desde el cierre de H1, `./verify.sh` del propio repo, que incluye `red-first`.
+1. **Unitarias:** `python3 -m unittest discover -s tests -v` en verde tras cada tarea (11 → 16 → 37 → 52 → 64 → 80 → 88 → 98 → 104 → 110 tests), también con `/usr/bin/python3` (3.9.6). Desde el cierre de H1, `./verify.sh` del propio repo, que incluye `red-first`.
 2. **Aceptaciones manuales** de H0, H1 y H2, con sus resultados en `LEARNINGS.md`.
 3. **Escenarios:** el 00 con `claude -p "/drydock" --permission-mode dontAsk`; el 06 y el 07 con `acceptEdits` y los comandos preaprobados, comparados con sus líneas base sin el skill (Paso 0 de H2).
 4. **Piloto** (H6): un producto .NET 10 pequeño de la idea al servidor.
