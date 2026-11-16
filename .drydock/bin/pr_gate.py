@@ -90,6 +90,9 @@ def decide(payload: dict) -> dict:
         if is_merge and f"--match-head-commit {head}" not in command:
             return decision("deny", f"Add --match-head-commit {head} to the merge command so it cannot include "
                                     "unreviewed commits.")
+    elif is_merge:                                  # a global allow rule can override permissions.ask; a hook decision cannot
+        return decision("ask", "gh pr merge outside a block. Drydock integrates blocks through their PRs; "
+                               "approve only for a manual integration.")
     if is_push:
         return push_decision(root, command)
     return {}
