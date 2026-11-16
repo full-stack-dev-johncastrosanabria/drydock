@@ -1,0 +1,12 @@
+{
+  "base_branch": "main",
+  "src_globs": ["*.cs"],
+  "test_globs": ["tests/*", "*Tests/*"],
+  "red": "dotnet test --filter Category!=Integration",
+  "steps": [
+    {"name": "format", "mode": "fast", "run": "dotnet format --verify-no-changes"},
+    {"name": "build", "mode": "fast", "run": "dotnet build -warnaserror"},
+    {"name": "unit", "mode": "fast", "run": "dotnet test --no-build --filter Category!=Integration"},
+    {"name": "integration", "mode": "full", "run": "dotnet test --no-build --filter Category=Integration"}
+  ]
+}

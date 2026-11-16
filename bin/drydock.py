@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from typing import Optional
 PHASES = ("requirements", "architecture", "audit", "prepare", "specs", "blocks", "build", "review")
 CLOSED = "closed"
 STATE_PATHS = (".drydock/state.json", ".drydock/blocks.json", ".drydock/metrics.jsonl", "PROJECT_STATE.md")
+GATE_CHECKS = {}                                     # phase -> function(root) returning a list of errors
 
 NEXT = {
     "requirements": "Write docs/drydock/brief.md with the user, then run: drydock.py gate pass requirements",
@@ -102,11 +104,89 @@ def ensure_gitignore(root: Path) -> None:
         path.write_text(text + ("" if not text or text.endswith("\n") else "\n") + ".drydock/local/\n")
 
 
+def load_json(path: Path, default):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path: Path, obj) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, indent=2) + "\n")
+
+
+def merge_settings(existing: dict, template: dict) -> dict:
+    merged = json.loads(json.dumps(existing)) if existing else {}
+    permissions = merged.setdefault("permissions", {})
+    for kind in ("allow", "ask", "deny"):
+        current = permissions.setdefault(kind, [])
+        for rule in template.get("permissions", {}).get(kind, []):
+            if rule not in current:
+                current.append(rule)
+    for entry in template.get("hooks", {}).get("PreToolUse", []):
+        hooks = merged.setdefault("hooks", {}).setdefault("PreToolUse", [])
+        if not any("pr_gate.py" in json.dumps(hook) for e in hooks for hook in e.get("hooks", [])):
+            hooks.append(entry)
+    return merged
+
+
+def resolves(root: Path, base: str) -> bool:
+    return any(subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                              capture_output=True).returncode == 0
+               for ref in (f"refs/remotes/origin/{base}", f"refs/heads/{base}"))
+
+
+def doctor_report(root: Path) -> tuple:
+    errors, warnings = [], []
+    if not (root / "verify.sh").is_file() or not os.access(str(root / "verify.sh"), os.X_OK):
+        errors.append("verify.sh is missing or not executable")
+    for rel in (".drydock/bin/verify.py", ".drydock/bin/pr_gate.py"):
+        if not (root / rel).is_file():
+            errors.append("%s is missing" % rel)
+    config = load_json(root / ".drydock" / "verify.json", None)
+    if not isinstance(config, dict) or not isinstance(config.get("steps"), list) or not config["steps"]:
+        errors.append(".drydock/verify.json is missing, not JSON or has no steps")
+    elif not resolves(root, config.get("base_branch", "main")):
+        errors.append('base_branch "%s" does not resolve to a local or origin branch' % config.get("base_branch", "main"))
+    settings = load_json(root / ".claude" / "settings.json", {})
+    hooks = [hook for entry in settings.get("hooks", {}).get("PreToolUse", []) for hook in entry.get("hooks", [])
+             if "pr_gate.py" in json.dumps(hook)]
+    if not hooks:
+        errors.append("no PreToolUse hook runs .drydock/bin/pr_gate.py")
+    elif hooks[0].get("onFailure") != "block":
+        errors.append('the pr_gate.py hook lacks "onFailure": "block"')
+    template = load_json(templates_dir() / "settings.json", {})
+    for rule in template.get("permissions", {}).get("ask", []):
+        if rule not in settings.get("permissions", {}).get("ask", []):
+            errors.append("missing permissions.ask rule %s" % rule)
+    gitignore = root / ".gitignore"
+    if ".drydock/local/" not in (gitignore.read_text().splitlines() if gitignore.is_file() else []):
+        errors.append(".gitignore does not list .drydock/local/")
+    if subprocess.run(["git", "-C", str(root), "ls-files", ".drydock/local"],
+                      capture_output=True, text=True).stdout.strip():
+        errors.append(".drydock/local is tracked by git")
+    for var in ("CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"):
+        if os.environ.get(var):
+            warnings.append("warning: %s is set and overrides routing.json" % var)
+    for rel, src in ((".drydock/bin/verify.py", "verify.py"), (".drydock/bin/pr_gate.py", "pr_gate.py"),
+                     ("verify.sh", "verify.sh")):
+        if (root / rel).is_file() and (root / rel).read_bytes() != (templates_dir() / src).read_bytes():
+            warnings.append("warning: %s differs from the skill template (run harness install --force)" % rel)
+    return errors, warnings
+
+
+GATE_CHECKS["prepare"] = lambda root: doctor_report(root)[0]
+
+
 def cmd_init(root: Path, args) -> None:
     if (root / ".drydock" / "state.json").exists():
         raise CliError(1, "already initialized")
     (root / ".drydock").mkdir(exist_ok=True)
     shutil.copyfile(str(templates_dir() / "routing.json"), str(root / ".drydock" / "routing.json"))
+    settings = root / ".claude" / "settings.json"
+    template = load_json(templates_dir() / "settings.json", {})
+    write_json(settings, merge_settings(load_json(settings, {}), {"permissions": template.get("permissions", {})}))
     ensure_gitignore(root)
     save_state(root, {"version": 1, "phase": PHASES[0], "gates": {p: None for p in PHASES},
                       "slice": None, "slices_done": [], "current_block": None})
@@ -131,6 +211,13 @@ def cmd_gate_pass(root: Path, args) -> None:
     phase = args.phase
     if state["phase"] != phase:
         raise CliError(1, "current phase is %s, not %s" % (state["phase"], phase))
+    check = GATE_CHECKS.get(phase)
+    if check:
+        errors = check(root)
+        if errors:
+            for error in errors:
+                print("error: %s" % error)
+            return 1
     if (phase == "build") != (args.next is not None):
         raise CliError(1, "--next is required in build and only valid there" if phase == "build"
                        else "--next is only valid in build")
@@ -168,6 +255,46 @@ def cmd_render_state(root: Path, args) -> None:
     render_state(root)
 
 
+def cmd_harness(root: Path, args) -> None:
+    steps = templates_dir() / "verify-steps" / ("%s.json" % args.stack)
+    if not steps.is_file():
+        available = ", ".join(sorted(p.stem for p in (templates_dir() / "verify-steps").glob("*.json")))
+        raise CliError(1, "unknown stack %s; available: %s" % (args.stack, available))
+    copies = (("verify.sh", "verify.sh", True),
+              (".drydock/bin/verify.py", "verify.py", True),
+              (".drydock/bin/pr_gate.py", "pr_gate.py", True),
+              (".drydock/verify.json", "verify-steps/%s.json" % args.stack, False),
+              (".github/workflows/verify.yml", "ci/github-actions-%s.yml" % args.stack, False))
+    for rel, src, owned in copies:
+        dst = root / rel
+        existed = dst.exists()
+        if existed and not (args.force and owned):
+            print("kept %s" % rel)
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(str(templates_dir() / src), str(dst))
+        if rel == "verify.sh":
+            os.chmod(str(dst), 0o755)
+        print("%s %s" % ("overwrote" if existed else "created", rel))
+    settings = root / ".claude" / "settings.json"
+    write_json(settings, merge_settings(load_json(settings, {}), load_json(templates_dir() / "settings.json", {})))
+    print("merged .claude/settings.json")
+    ensure_gitignore(root)
+
+
+def cmd_doctor(root: Path, args) -> int:
+    errors, warnings = doctor_report(root)
+    for error in errors:
+        print("error: %s" % error)
+    for warning in warnings:
+        print(warning)
+    if errors:
+        print("doctor: %d error(s)" % len(errors))
+        return 1
+    print("doctor: ok" + (" (%d warnings)" % len(warnings) if warnings else ""))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="drydock.py")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -185,14 +312,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     p.set_defaults(fn=cmd_slice_set)
     sub.add_parser("render-state").set_defaults(fn=cmd_render_state)
+    p = sub.add_parser("harness").add_subparsers(dest="sub", required=True).add_parser("install")
+    p.add_argument("--stack", required=True)
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(fn=cmd_harness)
+    sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
     return ap
 
 
 def main(argv: Optional[list] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        args.fn(repo_root(Path.cwd()), args)
-        return 0
+        return args.fn(repo_root(Path.cwd()), args) or 0
     except Exception as e:
         # --soft must never fail: a malformed state file cannot stop the skill from loading
         if getattr(args, "soft", False):
