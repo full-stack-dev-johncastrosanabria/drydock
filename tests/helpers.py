@@ -54,6 +54,19 @@ class RepoCase(unittest.TestCase):
         self.git("commit", "-q", "--allow-empty", "-m", message)
         return self.head()
 
+    def install_verify(self, config):                # copia los dos archivos, escribe verify.json y .gitignore, hace commit
+        for src, dst in ((TEMPLATES / "verify.py", ".drydock/bin/verify.py"), (TEMPLATES / "verify.sh", "verify.sh")):
+            (self.repo / dst).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src, self.repo / dst)
+        os.chmod(self.repo / "verify.sh", 0o755)
+        self.write(".gitignore", ".drydock/local/\n")
+        self.write_json(".drydock/verify.json", config)
+        return self.commit("chore: harness")
+
+    def set_verify(self, **changes):                 # mezcla claves en verify.json y hace commit
+        self.write_json(".drydock/verify.json", {**self.read_json(".drydock/verify.json"), **changes})
+        return self.commit("chore: verify config")
+
     def set_phase(self, phase, slice=None):          # salta a una fase: init si hace falta, gates anteriores cerrados
         if not (self.repo / ".drydock/state.json").exists():
             self.cli("init")
