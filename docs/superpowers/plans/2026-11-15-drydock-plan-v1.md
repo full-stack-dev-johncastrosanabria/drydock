@@ -94,6 +94,10 @@ Al aprobarlo se ejecuta el paso 0 (B0): actualizar herramientas, mover la carpet
 
 46. Sus seis ajustes pendientes, todos pequeños y sin cambiar ningún total de tests: `status --soft` atrapa cualquier excepción; `test_render_state_idempotent` comprueba el código de salida; `HARNESS_PATHS` cubre también `AGENTS.md`, `CLAUDE.md`, `.claude/skills/` y `.specify/`; un check en `skipping` no bloquea `block merge`; el Paso 0 de H1 comprueba qué niega `dontAsk` además de los `ask`; y la respuesta del revisor se registra sin editar. (T1, T6B, T6C, T8, H1)
 
+**Por la aceptación de H0 (2026-11-16):**
+
+47. El router inyecta la fase. En `dontAsk`, Claude Code niega leer los archivos del propio skill (`Read`, y `cat` por Bash), así que la fase nunca cargaba; permitirlo en `allowed-tools` no sirvió. Ahora `status --soft --phase` imprime el archivo de la fase en curso y `adapters/claude.md`, `SKILL.md` lo inyecta en una sección `## Phase`, y la regla 2 solo manda leerlos a mano si la inyección no corrió. Aprobado por John en la sesión de H0. Suma un test, así que todos los totales suben uno desde T2. Coste: cada `/drydock` inyecta la fase entera, también con `status`. Además, de la revisión de T1: `gate pass build` sin rebanada fijada sale 1 (`no slice set in build`) en vez de corromper el estado. (T1, T2, B3, T14)
+
 **De la revisión, no aplicado** (y por qué): un hook que niegue siempre en lugar de reglas `ask` queda como opción B de A5; `block merge` como comprobador para T2 y T3 sobra, porque el hook ya exige lo mismo en `gh pr merge`; `deploy <sha>` cubría un `deploy.json` cambiado por auto-merge, que cierra el cambio 31; que el revisor registre su propio veredicto sigue dependiendo de prosa, y se mide en H2 y H6; revalidar el plan en `block merge` no detecta una rebaja coherente de nivel y puntuación; `block abort` y el contador de commits de código en la evidencia pasan a A9; `--attempts`, `--findings` y `--stack` se quedan como están; y el aviso sobre el SHA abreviado de `review record` no aplica, porque T8 ya nombra el archivo con el `HEAD` completo.
 
 **Para recortar**, si quieres menos, y qué arrastra cada ⊕: el 19 se lleva `PUSH_RE`, `test_push_to_base_asks`, el punto 1 de B2 y el paso 5 de la aceptación de H1; el 21 y el 22 están fijados por `test_settings_template` y `test_install_preserves_existing_settings`, y sin el 21 cada comando de la CLI pide permiso (en `dontAsk`, se niega). El 20 no era un añadido: v0 ya pedía copiar evidencia y veredicto al cuerpo del PR. Yo conservaría los tres. Lo único de H0–H2 que aplazaría es el auto-merge (T6C), y solo si tú lo dices.
@@ -431,7 +435,7 @@ Cada archivo de `phases/` acaba con las mismas secciones: Purpose, Inputs, Steps
 | Comando | Efecto | Salida |
 |---|---|---|
 | `init` | Crea `.drydock/state.json` y `routing.json`, añade `.drydock/local/` a `.gitignore`, genera `PROJECT_STATE.md`; desde T5 fusiona las reglas `permissions` en `.claude/settings.json` | 0 · 1 ya inicializado · 2 no es repo git |
-| `status [--soft]` | Fase, rebanada, bloque y siguiente acción. `--soft` sale 0 siempre | 0 · 2 |
+| `status [--soft] [--phase]` | Fase, rebanada, bloque y siguiente acción. `--soft` sale 0 siempre. `--phase` imprime en su lugar el archivo de la fase en curso y el adaptador | 0 · 2 |
 | `gate pass <phase> [--note T] [--next specs\|review]` | Corre el chequeo automático de la fase si existe, cierra el gate y avanza. `--next` es obligatorio en `build`; desde H5, opcional en `review` (`--next specs`) | 0 · 1 |
 | `slice set <id>` | Fija la rebanada; solo en `specs` y si existe `specs/<id>/` | 0 · 1 |
 | `render-state` | Regenera `PROJECT_STATE.md` (también lo hace todo comando que cambia estado) | 0 |
@@ -730,7 +734,7 @@ Esperado: 11 fallos (`bin/drydock.py` no existe).
 
 - [ ] **Paso 6: implementar `bin/drydock.py`** con las firmas del bloque Interfaces. Decisiones que los tests no fijan:
 
-  - `init` comprueba primero que es repo git (2) y después que no existe `state.json` (1). `gate pass` sobre fase `closed` sale 1.
+  - `init` comprueba primero que es repo git (2) y después que no existe `state.json` (1). `gate pass` sobre fase `closed` sale 1. `gate pass build` sin rebanada fijada sale 1 con `no slice set in build`.
   - `status` imprime exactamente cuatro líneas: `phase: <phase>`, `slice: <slice o ->`, `block: <id o ->`, `next: <frase>`. `--soft` convierte cualquier excepción (`except Exception`, no solo `CliError`) en `drydock: <mensaje>` por stdout y sale 0: un `state.json` o un `blocks.json` con forma rara no puede impedir que el skill cargue.
   - `gate pass build --next specs`: `phase = "specs"`; gates `specs`, `blocks` y `build` vuelven a `null`; `slice` pasa a `slices_done` y queda en `null`. `--next review`: cierra el gate `build`, mueve `slice` igual y avanza a `review`. Imprime `gate <phase> closed -> <nueva fase>`.
   - `PROJECT_STATE.md` (sin fechas, para que sea idempotente):
@@ -777,9 +781,11 @@ Esperado: `Ran 11 tests … OK`
 
 **Archivos:**
 - Crear: `SKILL.md`, `phases/1-requirements.md` … `phases/8-review.md`, `adapters/claude.md`, `README.md`, `LEARNINGS.md`, `tests/test_budgets.py`, `scenarios/00-router.md`
+- Modificar: `bin/drydock.py` (`status --phase`), `tests/test_state.py`
 
 **Interfaces:**
 - Consume: `status --soft` (T1).
+- Produce (CLI): `status --soft --phase` imprime `phases/<n>-<phase>.md` de la fase en curso, una línea en blanco y `adapters/claude.md`, resueltos desde la carpeta del skill; en fase `closed` no imprime nada.
 - Produce: el skill invocable como `/drydock`; los nombres de archivo `phases/<n>-<phase>.md` que T8 y H3–H5 rellenan.
 
 - [ ] **Paso 1: escribir los tests que fallan** en `tests/test_budgets.py`
@@ -814,12 +820,27 @@ class BudgetTests(unittest.TestCase):
             self.assertIn(line, front.splitlines())
         self.assertRegex(front, r"(?m)^description: \S")
         self.assertIn("!`python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py status --soft`", text)
+        self.assertIn("!`python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py status --soft --phase`", text)
+```
+
+Y un test más en `tests/test_state.py`, dentro de `StateTests` (el `import` de `helpers` gana `ROOT`):
+
+```python
+    def test_status_phase_prints_phase_file_and_adapter(self):
+        self.cli("init")
+        r = self.cli("status", "--soft", "--phase")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        expected = (ROOT / "phases" / "1-requirements.md").read_text() + "\n" + (ROOT / "adapters" / "claude.md").read_text()
+        self.assertEqual(r.stdout, expected)
+        self.set_phase("review")
+        self.cli("gate", "pass", "review")
+        self.assertEqual(self.cli("status", "--soft", "--phase").stdout, "")     # closed: no phase file
 ```
 
 - [ ] **Paso 2: correrlos y verlos fallar**
 
-Correr: `python3 -m unittest discover -s tests -p "test_budgets.py" -v`
-Esperado: 4 errores (`SKILL.md` y `phases/` no existen).
+Correr: `python3 -m unittest discover -s tests -v`
+Esperado: 4 errores en `test_budgets.py` (`SKILL.md` y `phases/` no existen) y 1 fallo en `test_state.py` (`status` no conoce `--phase`).
 
 - [ ] **Paso 3: commit** `git add tests && git commit -m "test(T2): budgets and skill frontmatter"`
 
@@ -844,10 +865,14 @@ If the State line still shows the command instead of its output, run it yourself
 `drydock.py <command>`, here and in every phase file, means
 `python3 <directory of this file>/bin/drydock.py <command>` run from inside the product repository.
 
+## Phase
+
+!`python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py status --soft --phase`
+
 ## Rules
 
 1. State says `not initialized`: explain that `drydock.py init` creates `.drydock/` and adds permission rules to `.claude/settings.json` in this repository, run it only after the user agrees, then stop.
-2. Read exactly one phase file: `phases/<n>-<phase>.md` for the phase in State (1 requirements, 2 architecture, 3 audit, 4 prepare, 5 specs, 6 blocks, 7 build, 8 review). Also read `adapters/claude.md`. Never read another phase to get ahead.
+2. The Phase section above holds the phase file for the phase in State, followed by `adapters/claude.md`. Only if it still shows the command, read them yourself: `phases/<n>-<phase>.md` (1 requirements, 2 architecture, 3 audit, 4 prepare, 5 specs, 6 blocks, 7 build, 8 review) and `adapters/claude.md`. Never read another phase to get ahead.
 3. Follow that phase file step by step. Its Gate section is the only definition of done.
 4. A gate closes only with `drydock.py gate pass <phase>`, after its condition holds. The user approves that command. Never rephrase a command to avoid an approval prompt, and never edit `.drydock/state.json` or `.drydock/local/` by hand. If the command is denied without a prompt, stop and ask the user to run it themselves.
 5. Argument `status`: print State and stop.
@@ -881,25 +906,26 @@ Not built yet (milestone <H>). Do this phase by hand until the gate condition ho
 | `7-build.md` | Build each block: red-first TDD, fast verify, independent review, full verify, PR, merge; deploy when the slice is complete | Every block is done and the slice is deployed | H2 |
 | `8-review.md` | Review the whole product, start it from a clean clone, write the retro | No blocker is open and `drydock.py clean-clone` passes | H5 |
 
-- [ ] **Paso 6: escribir `adapters/claude.md`, `README.md` y `LEARNINGS.md`**
+- [ ] **Paso 6: escribir `adapters/claude.md`, `README.md` y `LEARNINGS.md`, e implementar `status --phase`**
 
   - `adapters/claude.md`: la CLI es `python3 ${CLAUDE_SKILL_DIR}/bin/drydock.py <command>`; las aprobaciones llegan como prompts de permiso (`gate pass`, `deploy`, `gh pr merge`, push a la base) y se esperan sin reformular el comando, y si el modo de permisos las niega sin preguntar se le pide a John que corra el comando; una línea "Subagent dispatch: see Task 8" que T8 sustituye.
   - `README.md`: qué es, instalación (`ln -s "$HOME/Developer/drydock" "$HOME/.claude/skills/drydock"`; la ruta no puede llevar espacios), tabla de comandos de B3, y recuperación: si todo Bash queda bloqueado, el hook está fallando; correr `python3 .drydock/bin/pr_gate.py < /dev/null` en una terminal para ver el error.
   - `LEARNINGS.md`: solo el título y la cabecera de tabla `| Date | Observed failure | Change made |`.
+  - `bin/drydock.py`: `status --phase`, como en Interfaces. Lee el estado igual que `status`, así que con `--soft` un repo sin inicializar imprime `drydock: not initialized` y sale 0.
 
 - [ ] **Paso 7: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 15 tests … OK`
+Esperado: `Ran 16 tests … OK`
 
-- [ ] **Paso 8: escribir `scenarios/00-router.md`** con las secciones Setup, Prompt, Pass criteria, Log (sin línea base: sin el skill no hay router que comparar). Casos: (a) repo sin inicializar → propone `init` y no toca nada más; (b) fase `requirements` → lee solo `phases/1-requirements.md`; (c) `/drydock status` → imprime el estado y termina. Comando sin intervención: `claude -p "/drydock" --permission-mode dontAsk --output-format json` en un repo temporal.
+- [ ] **Paso 8: escribir `scenarios/00-router.md`** con las secciones Setup, Prompt, Pass criteria, Log (sin línea base: sin el skill no hay router que comparar). Casos: (a) repo sin inicializar → propone `init` y no toca nada más; (b) fase `requirements` → sigue solo la fase 1, que llega inyectada, sin leer ningún archivo del skill; (c) `/drydock status` → imprime el estado y termina. Comando sin intervención: `claude -p "/drydock" --permission-mode dontAsk --output-format json` en un repo temporal.
 
 - [ ] **Paso 9: commit** `git add -A && git commit -m "feat(T2): router skill and phase stubs"`
 
 **Aceptación de H0** (a mano; pide confirmación a John antes de crear el enlace en `~/.claude/skills`):
 
 1. Crear el enlace y abrir Claude Code en un repo git vacío de prueba. `/drydock` muestra `drydock: not initialized` en la línea State, sin prompt de permiso, y propone `init`.
-2. Tras `init`, `/drydock` lee solo `phases/1-requirements.md`.
+2. Tras `init`, `/drydock` sigue solo la fase 1 (`phases/1-requirements.md`, inyectada por `status --soft --phase`), sin leer archivos del skill.
 3. `claude -p "/drydock status"` imprime el estado y termina.
 4. Anotar en el Log del escenario 00 la fecha, `claude --version` y si `${CLAUDE_SKILL_DIR}` apuntó al enlace o al destino.
 5. En el modo habitual de John (`dontAsk`), `drydock.py gate pass requirements` se niega sin prompt, y el skill se detiene y le pide a John que lo corra él (regla 4).
@@ -1570,7 +1596,7 @@ Los globs son amplios a propósito: cualquier `.cs` es código salvo lo que viva
 - [ ] **Paso 6: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 62 tests … OK`
+Esperado: `Ran 63 tests … OK`
 
 - [ ] **Paso 7: commit** `git add -A && git commit -m "feat(T5): harness install and doctor"`
 
@@ -1986,7 +2012,7 @@ Esperado: 8 fallos (argparse no conoce `block`).
 - [ ] **Paso 6: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 86 tests … OK`
+Esperado: `Ran 87 tests … OK`
 
 - [ ] **Paso 7: commit** `git add -A && git commit -m "feat(T6B): block lifecycle"`
 
@@ -2181,7 +2207,7 @@ Esperado: 10 fallos (argparse no conoce `block merge`; `block close` exige `--me
 - [ ] **Paso 7: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 96 tests … OK`
+Esperado: `Ran 97 tests … OK`
 
 - [ ] **Paso 8: commit** `git add -A && git commit -m "feat(T6C): T1 auto-merge"`
 
@@ -2300,7 +2326,7 @@ Nombres de archivo: `drydock-impl-<tier en minúsculas>.md` por cada nivel y `dr
 - [ ] **Paso 6: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 102 tests … OK`
+Esperado: `Ran 103 tests … OK`
 
 - [ ] **Paso 7: commit** `git add -A && git commit -m "feat(T7): agent rendering"`
 
@@ -2408,7 +2434,7 @@ Tier: <tier> · Commit: <sha7>
 - [ ] **Paso 5: correr y ver pasar**
 
 Correr: `python3 -m unittest discover -s tests -v`
-Esperado: `Ran 108 tests … OK`
+Esperado: `Ran 109 tests … OK`
 
 - [ ] **Paso 6: commit** `git add bin && git commit -m "feat(T8): review record and PR body"`
 
@@ -2425,7 +2451,7 @@ Esperado: `Ran 108 tests … OK`
 
 - [ ] **Paso 9: correr la suite y commit**
 
-Correr: `python3 -m unittest discover -s tests -v` → `Ran 108 tests … OK` (los presupuestos de líneas siguen en verde).
+Correr: `python3 -m unittest discover -s tests -v` → `Ran 109 tests … OK` (los presupuestos de líneas siguen en verde).
 `git add -A && git commit -m "feat(T8): blocks and build phases"`
 
 **Aceptación de H2** (repo de juguete en GitHub, 6 a 8 tareas):
@@ -2498,7 +2524,7 @@ Correr: `python3 -m unittest discover -s tests -v` → `Ran 108 tests … OK` (l
 ### Tarea 14: el skill completo en Codex
 
 - [ ] Archivos: `adapters/codex.md`, `agents/openai.yaml`, `bin/drydock.py` (`harness install` escribe también `.codex/hooks.json`), `tests/test_codex.py`, escenarios repetidos bajo Codex
-- Contrato: enlace `~/.agents/skills/drydock` (con confirmación de John); `agents/openai.yaml` con `policy.allow_implicit_invocation: false`; el adaptador explica que el estado no se inyecta (se corre `status --soft` a mano), cómo se localiza la CLI y cómo se aprueba; `.codex/hooks.json` usa el mismo `pr_gate.py` con el argumento `--deny-on-ask`, leído de `sys.argv`: como Codex no admite `ask`, cada `ask` sale como `deny` con el motivo, y John corre las aprobaciones en su terminal. La regla 2 del router gana aquí la mención a `adapters/codex.md`, y Spec Kit se inicializa con su integración de Codex (`--integration codex`; el Spec Kit 1.0.8 instalado la trae).
+- Contrato: enlace `~/.agents/skills/drydock` (con confirmación de John); `agents/openai.yaml` con `policy.allow_implicit_invocation: false`; el adaptador explica que el estado no se inyecta (se corre `status --soft` a mano), cómo se localiza la CLI y cómo se aprueba; `.codex/hooks.json` usa el mismo `pr_gate.py` con el argumento `--deny-on-ask`, leído de `sys.argv`: como Codex no admite `ask`, cada `ask` sale como `deny` con el motivo, y John corre las aprobaciones en su terminal. La regla 2 del router gana aquí la mención a `adapters/codex.md`, `status --phase` (que hoy imprime siempre `adapters/claude.md`) gana la elección de adaptador, y Spec Kit se inicializa con su integración de Codex (`--integration codex`; el Spec Kit 1.0.8 instalado la trae).
 - Tests: `test_harness_installs_codex_hooks`, `test_openai_yaml_disables_implicit_invocation`, `test_ask_becomes_deny_for_codex`.
 - Por comprobar antes de bajar a TDD: subagentes y elección de modelo por nivel en Codex, su política de aprobaciones como sustituto de las reglas `ask`, y el nombre de la integración de Spec Kit para Codex. Si Codex no puede rutear por nivel, el adaptador lo declara como límite y los bloques corren con el modelo de la sesión.
 
@@ -2508,7 +2534,7 @@ Casi nada de lo verificado se ejecutó: salió de documentación oficial y de `-
 
 | Qué | Dónde |
 |---|---|
-| Inyección del estado con el skill enlazado; si `${CLAUDE_SKILL_DIR}` da el enlace o el destino | Aceptación de H0, con contingencia escrita |
+| Inyección del estado con el skill enlazado; si `${CLAUDE_SKILL_DIR}` da el enlace o el destino | Comprobado en la aceptación de H0 (2026-11-16, `claude -p` en `dontAsk`): se inyecta sin prompt y da el enlace. Falta la sesión interactiva de John |
 | `{}` con salida 0 no bloquea Bash bajo `onFailure: "block"`; un script roto sí | Paso 0 de H1; aceptación de H1 (1, 3) |
 | `${CLAUDE_PROJECT_DIR}` dentro de `args` y bajo `claude --worktree` | Aceptación de H1 (2, 8) |
 | Reglas `ask` con comodín inicial; `ask` gana a `allow`; decisión `ask` desde un hook; qué hace `ask` en cada modo de permisos | Paso 0 de H1; aceptación de H0 (5) y de H1 (4, 5) |
@@ -2525,7 +2551,7 @@ Casi nada de lo verificado se ejecutó: salió de documentación oficial y de `-
 
 ## Verificación de punta a punta
 
-1. **Unitarias:** `python3 -m unittest discover -s tests -v` en verde tras cada tarea (11 → 15 → 35 → 50 → 62 → 78 → 86 → 96 → 102 → 108 tests), también con `/usr/bin/python3` (3.9.6). Desde el cierre de H1, `./verify.sh` del propio repo, que incluye `red-first`.
+1. **Unitarias:** `python3 -m unittest discover -s tests -v` en verde tras cada tarea (11 → 16 → 36 → 51 → 63 → 79 → 87 → 97 → 103 → 109 tests), también con `/usr/bin/python3` (3.9.6). Desde el cierre de H1, `./verify.sh` del propio repo, que incluye `red-first`.
 2. **Aceptaciones manuales** de H0, H1 y H2, con sus resultados en `LEARNINGS.md`.
 3. **Escenarios:** el 00 con `claude -p "/drydock" --permission-mode dontAsk`; el 06 y el 07 con `acceptEdits` y los comandos preaprobados, comparados con sus líneas base sin el skill (Paso 0 de H2).
 4. **Piloto** (H6): un producto .NET 10 pequeño de la idea al servidor.
