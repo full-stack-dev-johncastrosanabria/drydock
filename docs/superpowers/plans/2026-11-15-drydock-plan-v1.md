@@ -261,7 +261,7 @@ Al cerrar el último bloque de la rebanada: `drydock.py deploy` (H5) y `gate pas
 - Lee `tool_input.command` y `cwd` del JSON de stdin. Si el comando no es creación de PR, ni `gh pr merge`, ni `git push`: `{}`.
 - Resuelve la raíz con `git -C <cwd> rev-parse --show-toplevel`. Si no es repo o no tiene `.drydock/`: `{}`.
 - Creación de PR: niega si falta evidencia válida para `HEAD` o, con `state.current_block` no nulo, si `.drydock/local/reviews/<block>-<sha>.md` no empieza con `verdict: approve`.
-- `gh pr merge` con bloque en curso: las mismas dos condiciones y, además, que el comando lleve `--match-head-commit <HEAD>`.
+- `gh pr merge` con bloque en curso: las mismas dos condiciones y, además, que el comando lleve `--match-head-commit <HEAD>`. Sin bloque en curso: `ask`, porque un `allow` global pisa la regla `ask` de permisos (medido 2026-11-16) y la decisión del hook no se pisa.
 - `git push`: devuelve `ask` si la rama actual es la base o el comando la nombra.
 - Ante un error interno: niega si la entrada parece una creación de PR o un merge, pregunta si parece un push y, si no, `{}`.
 - El hook es respuesta rápida para el agente. La autoridad es CI y, donde el plan de GitHub lo permita, la protección de rama.
@@ -1305,10 +1305,13 @@ class PrGateTests(RepoCase):
             self.assertEqual(kind(self.gate(cmd)), "deny", cmd)
 
     def test_mentions_are_not_pr_commands(self):
-        for cmd in ('grep -r "gh pr create" .', 'git commit -m "docs: gh pr create"', "gh pr view 3", "gh pr merge 3 --squash",
+        for cmd in ('grep -r "gh pr create" .', 'git commit -m "docs: gh pr create"', "gh pr view 3",
                     "gh auth status && echo pr create", "git stash push", 'git commit -m "push later"',
                     'echo "time to gh pr create"'):
             self.assertEqual(self.gate(cmd), {}, cmd)
+
+    def test_merge_outside_block_asks(self):
+        self.assertEqual(kind(self.gate("gh pr merge 7 --squash")), "ask")   # un allow global anula la regla ask, no el hook
 
     def test_cwd_subdirectory(self):
         (self.repo / "sub").mkdir()
@@ -1404,7 +1407,7 @@ def main():
 
 1. `command = payload["tool_input"]["command"]`. Si no casa con `PR_RE`, `MERGE_RE` ni `PUSH_RE`: `{}`.
 2. Raíz con `git -C <cwd> rev-parse --show-toplevel` (`cwd` del payload, o el directorio actual). Si falla o no existe `<raíz>/.drydock/`: `{}`.
-3. Creación de PR, o merge (`MERGE_RE`) cuando `state.json` existe y `current_block` no es nulo; un merge sin bloque en curso no se evalúa. Con `head = git rev-parse HEAD`:
+3. Creación de PR, o merge (`MERGE_RE`) cuando `state.json` existe y `current_block` no es nulo; un merge sin bloque en curso devuelve `ask` (A5). Con `head = git rev-parse HEAD`:
    - Sin `.drydock/local/evidence/<head>.full.json`: deny `No full verify evidence for commit <head7>. Run ./verify.sh and retry.`
    - Evidencia que no cumple `sha == head`, `mode == "full"`, `result == "pass"`, `dirty is False`: deny `Verify evidence for <head7> is not a clean full pass (result=<r>, dirty=<d>). Commit or ignore the pending files, then run ./verify.sh.`
    - `state.json` existe, `current_block` no es nulo y la primera línea de `.drydock/local/reviews/<block>-<head>.md` no es `verdict: approve`: deny `Block <block> has no approving review for commit <head7>. Dispatch the reviewer and run drydock.py review record.`
