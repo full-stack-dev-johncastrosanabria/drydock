@@ -80,7 +80,10 @@ def decide(payload: dict) -> dict:
     root = managed_root(payload.get("cwd") or os.getcwd())
     if root is None:
         return {}
-    head = git(root, "rev-parse", "HEAD")
+    try:
+        head = git(root, "rev-parse", "HEAD")
+    except subprocess.CalledProcessError:           # no commits: nothing can be verified
+        return decision("deny", "This repository has no HEAD commit; commit before creating a PR, merging or pushing.")
     state = root / ".drydock" / "state.json"
     block = json.loads(state.read_text()).get("current_block") if state.exists() else None
     if is_pr or (is_merge and block):
