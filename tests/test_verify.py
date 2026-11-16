@@ -95,6 +95,10 @@ class RedFirstTests(VerifyCase):
         ev = self.evidence("fast")
         self.assertEqual((ev["result"], ev["steps"][-1]["name"]), ("fail", "red-first"))
 
+    def test_non_ascii_source_path_is_seen(self):
+        self.impl(path="src/caf\u00e9.txt")                      # git entrecomilla rutas no ASCII si no se le pide lo contrario
+        self.assertEqual(self.verify("--fast").returncode, 1)
+
     def test_green_test_does_not_arm(self):
         self.commit("test(B01/T001): always green", {"tests/run.sh": "true\n"})
         self.impl()
