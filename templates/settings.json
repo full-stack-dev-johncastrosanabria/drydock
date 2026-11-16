@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": ["Bash(python3 *drydock.py *)", "Bash(./verify.sh*)"],
+    "ask": ["Bash(*drydock.py gate pass*)", "Bash(*drydock.py deploy*)", "Bash(*gh pr merge*)"],
+    "deny": ["Skill(speckit-implement)"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PROJECT_DIR}/.drydock/bin/pr_gate.py"],
+            "onFailure": "block",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
