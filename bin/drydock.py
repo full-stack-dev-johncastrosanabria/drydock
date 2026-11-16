@@ -128,6 +128,8 @@ def cmd_gate_pass(root: Path, args) -> None:
                        else "--next is only valid in build")
     if phase == "build" and args.next not in ("specs", "review"):
         raise CliError(1, "--next must be specs or review")
+    if phase == "build" and not state["slice"]:
+        raise CliError(1, "no slice set in build")
     if phase == "build":
         new = args.next
         state["slices_done"].append(state["slice"])
