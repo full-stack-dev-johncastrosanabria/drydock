@@ -67,6 +67,15 @@ class RepoCase(unittest.TestCase):
         self.write_json(".drydock/verify.json", {**self.read_json(".drydock/verify.json"), **changes})
         return self.commit("chore: verify config")
 
+    def write_evidence(self, mode="full", result="pass", dirty=False, sha=None, tdd_exempt=()):
+        sha = sha or self.head()
+        return self.write_json(f".drydock/local/evidence/{sha}.{mode}.json",
+                               {"sha": sha, "mode": mode, "result": result, "dirty": dirty, "steps": [],
+                                "tdd_exempt": list(tdd_exempt), "finished_at": "2026-01-01T00:00:00Z"})
+
+    def write_review(self, block, verdict="approve", sha=None):
+        return self.write(f".drydock/local/reviews/{block}-{sha or self.head()}.md", f"verdict: {verdict}\n\nok\n")
+
     def set_phase(self, phase, slice=None):          # salta a una fase: init si hace falta, gates anteriores cerrados
         if not (self.repo / ".drydock/state.json").exists():
             self.cli("init")
