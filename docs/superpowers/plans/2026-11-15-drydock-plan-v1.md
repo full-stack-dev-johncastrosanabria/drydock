@@ -1407,7 +1407,7 @@ def main():
 
 1. `command = payload["tool_input"]["command"]`. Si no casa con `PR_RE`, `MERGE_RE` ni `PUSH_RE`: `{}`.
 2. Raíz con `git -C <cwd> rev-parse --show-toplevel` (`cwd` del payload, o el directorio actual). Si falla o no existe `<raíz>/.drydock/`: `{}`.
-3. Creación de PR, o merge (`MERGE_RE`) cuando `state.json` existe y `current_block` no es nulo; un merge sin bloque en curso devuelve `ask` (A5). Con `head = git rev-parse HEAD`:
+3. Creación de PR, o merge (`MERGE_RE`) cuando `state.json` existe y `current_block` no es nulo; un merge sin bloque en curso devuelve `ask` (A5). Con `head = git rev-parse HEAD`; si no hay `HEAD` (repo sin commits), deny:
    - Sin `.drydock/local/evidence/<head>.full.json`: deny `No full verify evidence for commit <head7>. Run ./verify.sh and retry.`
    - Evidencia que no cumple `sha == head`, `mode == "full"`, `result == "pass"`, `dirty is False`: deny `Verify evidence for <head7> is not a clean full pass (result=<r>, dirty=<d>). Commit or ignore the pending files, then run ./verify.sh.`
    - `state.json` existe, `current_block` no es nulo y la primera línea de `.drydock/local/reviews/<block>-<head>.md` no es `verdict: approve`: deny `Block <block> has no approving review for commit <head7>. Dispatch the reviewer and run drydock.py review record.`
