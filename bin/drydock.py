@@ -113,6 +113,13 @@ def cmd_init(root: Path, args) -> None:
 
 def cmd_status(root: Path, args) -> None:
     state = load_state(root)
+    if args.phase:
+        # dontAsk denies Read on the skill's own files, so the router injects them through this command
+        skill = Path(__file__).resolve().parent.parent
+        if state["phase"] in PHASES:
+            name = "%d-%s.md" % (PHASES.index(state["phase"]) + 1, state["phase"])
+            print((skill / "phases" / name).read_text() + "\n" + (skill / "adapters" / "claude.md").read_text(), end="")
+        return
     print("phase: %s\nslice: %s\nblock: %s\nnext: %s"
           % (state["phase"], state["slice"] or "-", state["current_block"] or "-",
              next_action(root, state, live=False)))
@@ -168,6 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init").set_defaults(fn=cmd_init)
     p = sub.add_parser("status")
     p.add_argument("--soft", action="store_true")
+    p.add_argument("--phase", action="store_true")
     p.set_defaults(fn=cmd_status)
     p = sub.add_parser("gate").add_subparsers(dest="sub", required=True).add_parser("pass")
     p.add_argument("phase", choices=PHASES)

@@ -19,7 +19,7 @@ Run `python3 bin/drydock.py <command>`. Exit codes: 0 ok, 1 rejected or failed c
 | Command | Effect | Exit |
 |---|---|---|
 | `init` | Creates `.drydock/state.json` and `routing.json`, adds `.drydock/local/` to `.gitignore`, generates `PROJECT_STATE.md`; from T5 it also merges the `permissions` rules into `.claude/settings.json` | 0 · 1 already initialized · 2 not a git repository |
-| `status [--soft]` | Phase, slice, block and next action. `--soft` always exits 0 | 0 · 2 |
+| `status [--soft] [--phase]` | Phase, slice, block and next action. `--soft` always exits 0. `--phase` prints the current phase file and the adapter instead | 0 · 2 |
 | `gate pass <phase> [--note T] [--next specs\|review]` | Runs the phase's automatic check if there is one, closes the gate and advances. `--next` is required in `build`; from H5, optional in `review` (`--next specs`) | 0 · 1 |
 | `slice set <id>` | Sets the slice; only in `specs` and only if `specs/<id>/` exists | 0 · 1 |
 | `render-state` | Regenerates `PROJECT_STATE.md` (every state-changing command does this too) | 0 |
