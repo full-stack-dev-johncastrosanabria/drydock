@@ -86,3 +86,35 @@ class RepoCase(unittest.TestCase):
     def snapshot(self):                              # {ruta relativa: bytes} de todo lo que no es .git
         files = (p for p in sorted(self.repo.rglob("*")) if p.is_file())
         return {str(p.relative_to(self.repo)): p.read_bytes() for p in files if ".git" not in p.relative_to(self.repo).parts}
+
+
+LOW = {"novelty": 0, "scope": 0, "risk": 0, "testing": 0, "ambiguity": 0}
+
+def task(task_id, **score):
+    return {"id": task_id, "score": {**LOW, **score}}
+
+def block(block_id, tasks, tier="T1", **extra):
+    return {"id": block_id, "title": f"Block {block_id}", "tier": tier, "tier_override": None, "depends_on": [],
+            "status": "pending", "tasks": [task(t) if isinstance(t, str) else t for t in tasks], **extra}
+
+def plan(*blocks):
+    return {"version": 1, "slice": "001-skeleton", "tasks_file": "specs/001-skeleton/tasks.md", "blocks": list(blocks)}
+
+def valid_plan():                                    # cubre tasks-a.md
+    return plan(block("B01", ["T001", "T002", "T003"]),
+                block("B02", ["T004"], depends_on=["B01"]),
+                block("B03", [task("T005", risk=2, novelty=1)], tier="T2", depends_on=["B02"]))
+
+class BlocksCase(RepoCase):
+    def setUp(self):
+        super().setUp()
+        self.set_phase("blocks", slice="001-skeleton")
+        self.commit("chore: init drydock")         # lo que deja init (settings, routing) ya está en la base, como en un producto real
+        self.write("specs/001-skeleton/tasks.md", (FIXTURES / "tasks-a.md").read_text())
+
+    def validate(self, plan_obj):
+        self.write_json(".drydock/blocks.json", plan_obj)
+        return self.cli("blocks", "validate")
+
+    def block_of(self, block_id):
+        return next(b for b in self.read_json(".drydock/blocks.json")["blocks"] if b["id"] == block_id)

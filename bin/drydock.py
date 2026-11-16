@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,11 @@ PHASES = ("requirements", "architecture", "audit", "prepare", "specs", "blocks",
 CLOSED = "closed"
 STATE_PATHS = (".drydock/state.json", ".drydock/blocks.json", ".drydock/metrics.jsonl", "PROJECT_STATE.md")
 GATE_CHECKS = {}                                     # phase -> function(root) returning a list of errors
+TIERS = ("T1", "T2", "T3")
+DIMENSIONS = ("novelty", "scope", "risk", "testing", "ambiguity")
+TASK_RE = re.compile(r"^\s*-\s\[(?P<done>[ xX])\]\s+(?P<id>T\d{3,})\b(?P<text>.*)$")
+CHECKBOX_RE = re.compile(r"^\s*-\s\[[ xX]\]\s")
+UNSUPPORTED_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)?\s*(?:\[[ xX]\]\s*)?\**T\d{3,}\b")   # un id fuera del formato de Spec Kit
 
 NEXT = {
     "requirements": "Write docs/drydock/brief.md with the user, then run: drydock.py gate pass requirements",
@@ -176,7 +182,156 @@ def doctor_report(root: Path) -> tuple:
     return errors, warnings
 
 
+def parse_tasks(path: Path) -> tuple:
+    tasks, errors = {}, []
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        match = TASK_RE.match(line)
+        if match:
+            tasks[match.group("id")] = match.group("text").strip()
+        elif CHECKBOX_RE.match(line):
+            errors.append("tasks.md:%d: checklist item without task id" % number)
+        elif UNSUPPORTED_RE.match(line):
+            errors.append("tasks.md:%d: task id in unsupported format" % number)
+    return tasks, errors
+
+
+def computed_tier(score: dict) -> str:
+    total = sum(score[d] for d in DIMENSIONS)
+    if score["risk"] == 2 or total >= 7:
+        return "T3" if total >= 7 else "T2"
+    return "T2" if total >= 4 else "T1"
+
+
+def load_blocks(root: Path) -> dict:
+    path = root / ".drydock" / "blocks.json"
+    if not path.exists():
+        raise CliError(1, "no block plan: .drydock/blocks.json")
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        raise CliError(1, "blocks.json unreadable: %s" % e)
+    if not isinstance(data, dict) or not isinstance(data.get("blocks"), list):
+        raise CliError(1, "blocks.json must be an object with a blocks list")
+    return data
+
+
+def cycle_path(graph: dict) -> Optional[list]:
+    seen, path = set(), []
+
+    def walk(node):
+        if node in path:
+            return path[path.index(node):] + [node]
+        if node in seen:
+            return None
+        seen.add(node)
+        path.append(node)
+        for dep in graph.get(node, []):
+            found = walk(dep)
+            if found:
+                return found
+        path.pop()
+        return None
+
+    for node in graph:
+        found = walk(node)
+        if found:
+            return found
+    return None
+
+
+def validate_blocks(root: Path) -> list:
+    try:
+        return _validate_blocks(root)
+    except (CliError, OSError, ValueError) as e:
+        return [str(e)]
+
+
+def _validate_blocks(root: Path) -> list:
+    state = load_state(root)
+    data = load_blocks(root)
+    expected = "specs/%s/tasks.md" % state["slice"]
+    if data.get("slice") != state["slice"]:
+        return ['blocks.json is for slice "%s", current slice is "%s"' % (data.get("slice"), state["slice"])]
+    if data.get("tasks_file") != expected:
+        return ["tasks_file must be %s" % expected]
+    path = root / expected
+    if not path.is_file():
+        return ["tasks file not found: %s" % expected]
+    file_tasks, parse_errors = parse_tasks(path)
+    if parse_errors:
+        return parse_errors
+    if not file_tasks:
+        return ["no tasks found in %s" % expected]
+    blocks = data["blocks"]
+    tiers = load_json(root / ".drydock" / "routing.json", {}).get("tiers", {})
+    errors, block_ids, task_ids = [], [], []
+    for entry in blocks:
+        block_id = entry.get("id", "?")
+        if block_id in block_ids:
+            errors.append("duplicate block id %s" % block_id)
+        block_ids.append(block_id)
+        for task in entry.get("tasks", []):
+            task_id = task.get("id") if isinstance(task, dict) else None
+            if task_id in task_ids:
+                errors.append("duplicate task id %s" % task_id)
+            task_ids.append(task_id)
+    unknown = sorted({t for t in task_ids if t not in file_tasks})
+    unassigned = sorted(t for t in file_tasks if t not in task_ids)
+    if unassigned:
+        errors.append("unassigned tasks: %s" % ", ".join(unassigned))
+    if unknown:
+        errors.append("unknown tasks: %s" % ", ".join(unknown))
+    for entry in blocks:
+        block_id = entry.get("id", "?")
+        status = entry.get("status", "pending")
+        if status not in ("pending", "in_progress", "done"):
+            errors.append('%s: invalid status "%s"' % (block_id, status))
+        tier = entry.get("tier")
+        if tier not in tiers:
+            errors.append("%s: unknown tier %s" % (block_id, tier))
+            continue
+        computed = "T1"
+        for task in entry.get("tasks", []):
+            task_id, score = task.get("id"), task.get("score", {})
+            valid = True
+            for dimension in DIMENSIONS:
+                if dimension not in score:
+                    errors.append("%s: missing score.%s" % (task_id, dimension))
+                    valid = False
+                elif isinstance(score[dimension], bool) or score[dimension] not in (0, 1, 2):
+                    errors.append("%s: score.%s must be 0, 1 or 2" % (task_id, dimension))
+                    valid = False
+            if valid and TIERS.index(computed_tier(score)) > TIERS.index(computed):
+                computed = computed_tier(score)
+        if TIERS.index(tier) < TIERS.index(computed):
+            errors.append("%s: tier %s is below computed %s" % (block_id, tier, computed))
+        elif TIERS.index(tier) > TIERS.index(computed) and not entry.get("tier_override"):
+            errors.append("%s: tier %s above computed %s needs tier_override" % (block_id, tier, computed))
+        max_tasks = tiers[tier].get("max_tasks")
+        if isinstance(max_tasks, int) and len(entry.get("tasks", [])) > max_tasks:
+            errors.append("%s: %d tasks exceeds max_tasks %d for %s"
+                          % (block_id, len(entry.get("tasks", [])), max_tasks, tier))
+        for dependency in entry.get("depends_on") or []:
+            if dependency not in block_ids:
+                errors.append("%s: unknown dependency %s" % (block_id, dependency))
+    graph = {entry.get("id"): [d for d in entry.get("depends_on") or [] if d in block_ids] for entry in blocks}
+    found = cycle_path(graph)
+    if found:
+        errors.append("dependency cycle: %s" % " -> ".join(found))
+    return errors
+
+
+def specs_gate_errors(root: Path) -> list:
+    state = load_state(root)
+    if not state["slice"]:
+        return ["no slice set: run drydock.py slice set <id>"]
+    expected = "specs/%s/tasks.md" % state["slice"]
+    return [] if (root / expected).is_file() else ["tasks file not found: %s" % expected]
+
+
 GATE_CHECKS["prepare"] = lambda root: doctor_report(root)[0]
+GATE_CHECKS["blocks"] = validate_blocks
+GATE_CHECKS["specs"] = specs_gate_errors
 
 
 def cmd_init(root: Path, args) -> None:
@@ -282,6 +437,15 @@ def cmd_harness(root: Path, args) -> None:
     ensure_gitignore(root)
 
 
+def cmd_blocks(root: Path, args) -> int:
+    errors = validate_blocks(root)
+    if errors:
+        for error in errors:
+            print("error: %s" % error, file=sys.stderr)
+        return 1
+    print("blocks: ok")
+
+
 def cmd_doctor(root: Path, args) -> int:
     errors, warnings = doctor_report(root)
     for error in errors:
@@ -317,6 +481,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_harness)
     sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
+    p = sub.add_parser("blocks").add_subparsers(dest="sub", required=True).add_parser("validate")
+    p.set_defaults(fn=cmd_blocks)
     return ap
 
 
