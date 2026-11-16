@@ -79,6 +79,8 @@ class StateTests(RepoCase):
         self.assertEqual(self.cli("gate", "pass", "build", "--next", "specs").returncode, 1)
         self.assertEqual(self.snapshot(), before)
         self.set_phase("build", slice="001-skeleton")
+        self.write_json(".drydock/blocks.json", {"version": 1, "slice": "001-skeleton",
+                                                 "tasks_file": "specs/001-skeleton/tasks.md", "blocks": []})
         self.assertEqual(self.cli("gate", "pass", "build").returncode, 1)
         self.assertEqual(self.cli("gate", "pass", "build", "--next", "specs").returncode, 0)
         s = self.state()
@@ -86,6 +88,8 @@ class StateTests(RepoCase):
         self.assertEqual([s["gates"][p] for p in ("specs", "blocks", "build")], [None, None, None])
         self.assertIsNotNone(s["gates"]["prepare"])
         self.set_phase("build", slice="002-users")
+        self.write_json(".drydock/blocks.json", {"version": 1, "slice": "002-users",
+                                                 "tasks_file": "specs/002-users/tasks.md", "blocks": []})
         self.assertEqual(self.cli("gate", "pass", "build", "--next", "review").returncode, 0)
         s = self.state()
         self.assertEqual((s["phase"], s["slice"], s["slices_done"]), ("review", None, ["001-skeleton", "002-users"]))
