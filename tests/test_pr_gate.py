@@ -53,10 +53,13 @@ class PrGateTests(RepoCase):
             self.assertEqual(kind(self.gate(cmd)), "deny", cmd)
 
     def test_mentions_are_not_pr_commands(self):
-        for cmd in ('grep -r "gh pr create" .', 'git commit -m "docs: gh pr create"', "gh pr view 3", "gh pr merge 3 --squash",
+        for cmd in ('grep -r "gh pr create" .', 'git commit -m "docs: gh pr create"', "gh pr view 3",
                     "gh auth status && echo pr create", "git stash push", 'git commit -m "push later"',
                     'echo "time to gh pr create"'):
             self.assertEqual(self.gate(cmd), {}, cmd)
+
+    def test_merge_outside_block_asks(self):
+        self.assertEqual(kind(self.gate("gh pr merge 7 --squash")), "ask")   # un allow global anula la regla ask, no el hook
 
     def test_cwd_subdirectory(self):
         (self.repo / "sub").mkdir()
